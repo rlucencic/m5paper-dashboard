@@ -217,7 +217,11 @@ void loop(void) {
 
 	if (!sht30.UpdateData()) {
 		tmp = sht30.GetTemperature();
+		// Temperature is +1.6° higher because of the M5Paper casing
+		tmp -= 1.6;
 		hum = sht30.GetRelHumidity();
+		// Rel. humidity is 5% lower because of the M5Paper casing
+		hum += 5;
 	}
 	// auto co2 = getCo2Data();
 	// setLEDColor(leds, co2);
