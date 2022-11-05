@@ -15,19 +15,19 @@ inline String WiFiConnectedToString(void) {
 String weekdayToString(const int8_t weekDay) {
 	switch (weekDay) {
 		case 0:
-			return String("日");
+			return String("NED");
 		case 1:
-			return String("月");
+			return String("PON");
 		case 2:
-			return String("火");
+			return String("UTO");
 		case 3:
-			return String("水");
+			return String("SRI");
 		case 4:
-			return String("木");
+			return String("CET");
 		case 5:
-			return String("金");
+			return String("PET");
 		case 6:
-			return String("土");
+			return String("SUB");
 	}
 	return String("");
 }

@@ -2,6 +2,6 @@
 
 namespace WiFiInfo
 {
-  constexpr auto SSID = "YOUR_SSID";
-  constexpr auto PASS = "YOUR_PASS";
+  constexpr auto SSID = "Jelengrad";
+  constexpr auto PASS = "11223344";
 } // namespace WiFiInfo

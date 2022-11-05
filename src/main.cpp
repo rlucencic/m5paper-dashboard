@@ -27,17 +27,16 @@ constexpr uint_fast16_t M5PAPER_SIZE_SHORT_SIDE = 540;
 rtc_time_t time_ntp;
 rtc_date_t date_ntp{4, 1, 1, 1970};
 
-TwoWire &wire_portA = Wire1;
 SemaphoreHandle_t xMutex = nullptr;
-SHT3X::SHT3X sht30(wire_portA);
+SHT3x sht30;
 static LGFX gfx;
 std::array<CRGB,3> leds;
 
 inline int syncNTPTimeJP(void) {
-	constexpr auto NTP_SERVER1 = "ntp.nict.jp";
-	constexpr auto NTP_SERVER2 = "time.cloudflare.com";
+	constexpr auto NTP_SERVER1 = "time1.ntp.hr";
+	constexpr auto NTP_SERVER2 = "time2.ntp.hr";
 	constexpr auto NTP_SERVER3 = "time.google.com";
-	constexpr auto TIME_ZONE = "JST-9";
+	constexpr auto TIME_ZONE = "MEZ-1MESZ-2,M3.5.0/02:00:00,M10.5.0/03:00:00";
 
 	auto datetime_setter = [](const tm &datetime) {
 		rtc_time_t time{static_cast<int8_t>(datetime.tm_hour), static_cast<int8_t>(datetime.tm_min),
@@ -188,10 +187,7 @@ void setup(void) {
 
 	ArduinoOTA.begin();
 
-	// env2 unit
-	if (!sht30.begin(25, 32, 400000)) {
-		gfx.println("Failed to initialize external I2C");
-	}
+	sht30.Begin();
 
 	xMutex = xSemaphoreCreateMutex();
 	if (xMutex != nullptr) {
@@ -219,12 +215,12 @@ void loop(void) {
 	float tmp = 0.0;
 	uint_fast8_t hum = 0;
 
-	if (!sht30.read()) {
-		tmp = sht30.getTemperature();
-		hum = sht30.getHumidity();
+	if (!sht30.UpdateData()) {
+		tmp = sht30.GetTemperature();
+		hum = sht30.GetRelHumidity();
 	}
-	auto co2 = getCo2Data();
-	setLEDColor(leds, co2);
+	// auto co2 = getCo2Data();
+	// setLEDColor(leds, co2);
 
 	rtc_date_t date;
 	rtc_time_t time;
@@ -242,7 +238,8 @@ void loop(void) {
 	gfx.setClipRect(offset_x, offset_y, M5PAPER_SIZE_LONG_SIDE - offset_x,
 					M5PAPER_SIZE_SHORT_SIDE - offset_y);
 	gfx.printf("%02d:%02d:%02d\r\n", time.hour, time.min, time.sec);
-	gfx.printf("%04dppm\r\n", co2);
+	// gfx.printf("%04dppm\r\n", co2);
+	gfx.printf("\n");
 	gfx.printf("%02.1f℃\r\n", tmp);
 	gfx.printf("%0d%%", hum);
 	gfx.clearClipRect();
@@ -251,8 +248,8 @@ void loop(void) {
 	gfx.setCursor(0, offset_y);
 	gfx.setClipRect(x, offset_y, M5PAPER_SIZE_LONG_SIDE - offset_x - x,
 					M5PAPER_SIZE_SHORT_SIDE - offset_y);
+	gfx.printf("%02d.%02d\r\n", date.day, date.mon);
 	gfx.printf("%04d\r\n", date.year);
-	gfx.printf("%02d/%02d\r\n", date.mon, date.day);
 	gfx.println(weekdayToString(date.week));
 	gfx.clearClipRect();
 

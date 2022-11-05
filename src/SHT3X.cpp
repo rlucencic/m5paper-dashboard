@@ -1,108 +1,142 @@
-#include "SHT3X.h"
 /*
-Software License Agreement (BSD License)
-
-Copyright (c) 2012, Adafruit Industries
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-1. Redistributions of source code must retain the above copyright
-notice, this list of conditions and the following disclaimer.
-2. Redistributions in binary form must reproduce the above copyright
-notice, this list of conditions and the following disclaimer in the
-documentation and/or other materials provided with the distribution.
-3. Neither the name of the copyright holders nor the
-names of its contributors may be used to endorse or promote products
-derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ''AS IS'' AND ANY
-EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*/
-namespace SHT3X
-{
-  int SHT3X::read()
-  {
-    uint8_t data[6];
-    constexpr uint8_t COMMAND_MEASURE[2] = {0x2C, 0x06};
-
-    // Start I2C Transmission
-    _wire.beginTransmission(Addr);
-    // Send measurement command
-    _wire.write(COMMAND_MEASURE, 2);
-    // Stop I2C transmission
-    if (_wire.endTransmission() != 0)
-      return 1;
-
-    delay(20);
-
-    // Request 6 bytes of data
-    _wire.requestFrom(Addr, static_cast<size_t>(6));
-
-    // Read 6 bytes of data
-    // cTemp msb, cTemp lsb, cTemp crc, humidity msb, humidity lsb, humidity crc
-    for (int i = 0; i < 6; i++)
-      data[i] = _wire.read();
-
-    if (data[2] != crc8(data, 2) || data[5] != crc8(data + 3, 2))
-      return 1;
-
-    int32_t sTemp = (static_cast<uint32_t>(data[0]) << 8) | data[1];
-    // simplified (65536 instead of 65535) integer version of:
-    // temp = (sTemp * 175.0f) / 65535.0f - 45.0f;
-    sTemp = ((4375 * sTemp) >> 14) - 4500;
-    _cTemp = static_cast<float>(sTemp) / 100.0f;
-
-    uint32_t sHum = (static_cast<uint32_t>(data[3]) << 8) | data[4];
-    // simplified (65536 instead of 65535) integer version of:
-    // humidity = (shum * 100.0f) / 65535.0f;
-    sHum = (625 * sHum) >> 12;
-    _humidity = static_cast<uint_fast8_t>(sHum / 100);
-
-    return 0;
-  }
-
-  /**
- * Performs a CRC8 calculation on the supplied values.
+ * The MIT License
  *
- * @param data  Pointer to the data to use when calculating the CRC8.
- * @param len   The number of bytes in 'data'.
+ * Copyright (c) IKEDA Yasuyuki
  *
- * @return The computed CRC8 value.
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  */
-  uint8_t SHT3X::crc8(const uint8_t *data, const int len)
-  {
-    /*
-   *
-   * CRC-8 formula from page 14 of SHT spec pdf
-   *
-   * Test data 0xBE, 0xEF should yield 0x92
-   *
-   * Initialization data 0xFF
-   * Polynomial 0x31 (x8 + x5 +x4 +1)
-   * Final XOR 0x00
-   */
+#include "SHT3x.h"
+#include <Wire.h>
 
-    constexpr uint8_t POLYNOMIAL(0x31);
-    uint8_t crc(0xFF);
+// Hack - add missing defines
+#define I2C_ERROR_OK      (0)
+#define I2C_ERROR_TIMEOUT (3)
 
-    for (int j = len; j; --j)
+namespace {
+const uint16_t I2C_ADDRESS = 0x44;
+
+// Repatability: High, Clock stretching: Enabled
+const uint8_t MEASUREMENT_MSB = 0x2c;
+const uint8_t MEASUREMENT_LSB = 0x06;
+
+const long TIMEOUT_MSEC = 50;
+const size_t BUF_SIZE   = 6;
+}  // namespace
+
+void SHT3x::Begin() {
+    // Use the default SDA=21 / SCL=22
+    Wire.begin();
+}
+
+uint8_t SHT3x::UpdateData() {
+    _lastError = UpdateDataImpl();
+    return _lastError;
+}
+
+uint8_t SHT3x::UpdateDataImpl() {
+    Wire.flush();
     {
-      crc ^= *data++;
+        uint8_t error = SendMeasurementCommand();
+        if (error != 0) {
+            return error;
+        }
+    }
 
-      for (int i = 8; i; --i)
-      {
-        crc = (crc & 0x80) ? (crc << 1) ^ POLYNOMIAL : (crc << 1);
-      }
+    uint8_t buf[BUF_SIZE];
+    {
+        uint8_t error = ReceiveResult(buf);
+        if (error != 0) {
+            return error;
+        }
+    }
+
+    if (!CheckCrc(buf)) {
+        return SHT3x_ERROR_CRC;
+    }
+
+    _rawTemperature = buf[0] << 8 | buf[1];
+    _rawHumidity    = buf[3] << 8 | buf[4];
+
+    return SHT3x_ERROR_OK;
+}
+
+uint8_t SHT3x::SendMeasurementCommand() {
+    Wire.beginTransmission(I2C_ADDRESS);
+
+    uint8_t err;
+
+    err = Wire.write(MEASUREMENT_MSB);
+    if (err != 1) {
+        return err;
+    }
+    err = Wire.write(MEASUREMENT_LSB);
+    if (err != 1) {
+        return err;
+    }
+
+    return Wire.endTransmission();
+}
+
+uint8_t SHT3x::ReceiveResult(uint8_t* buf) {
+    Wire.requestFrom(I2C_ADDRESS, BUF_SIZE);
+    Wire.setTimeout(TIMEOUT_MSEC);
+    if (Wire.readBytes(buf, BUF_SIZE) != BUF_SIZE) {
+        return 3;
+    }
+    return 0;
+}
+
+bool SHT3x::CheckCrc(uint8_t* buf) {
+    return (Crc8(buf, 2) == buf[2] && Crc8(buf + 3, 2) == buf[5]);
+}
+
+uint8_t SHT3x::Crc8(uint8_t* buf, size_t len) {
+    uint8_t crc = 0xff;  // initialization
+    while (len-- > 0) {
+        crc ^= *buf++;
+        for (int i = 0; i < 8; ++i) {
+            crc = (crc & 0x80) ? (crc << 1) ^ 0x31  // polynominal
+                               : (crc << 1);
+        }
     }
     return crc;
-  }
-} // namespace SHT3X
+}
+
+float SHT3x::GetTemperature(TemperatureScale Degree) {
+    switch (Degree) {
+        case Cel: {
+            return static_cast<float>(_rawTemperature) * 175.0f / 65535.0f -
+                   45.0f;
+        }
+        case Fah: {
+            return static_cast<float>(_rawTemperature) * 315.0f / 65535.0f -
+                   49.0f;
+        }
+    }
+    return 0.0f;
+}
+
+float SHT3x::GetRelHumidity() {
+    return static_cast<float>(_rawHumidity) * 100.0f / 65535.0f;
+}
+
+float SHT3x::GetAbsHumidity(AbsHumidityScale Scale) {
+    // Not implemented.
+    return 0.0f;
+}
