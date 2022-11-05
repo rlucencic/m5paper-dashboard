@@ -8,3 +8,12 @@ Set your Wi-Fi parameters in `src/WiFiInfo.h`
 - BtnL: Shutdown
 - BtnR: Refresh e-paper
 - BtnP: Time Synchronization with a NTP server
+
+## Differences from original estshorter/m5paper-dashboard
+
+- local Croatian NTP servers
+- local CET timezone
+- local day of the week
+- SHT3X implementation copied from m5stack/m5epd (work in progress to implement whole repository)
+- disabled CO reading (don't have sensor unit)
+
